@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Vics_Smart_Raceboard_v3.0.1.88</title>
+  <title>Vics_Smart_Raceboard_v3.0.1.89</title>
   <!-- v3.0.1.88: alinea LAST con BEST/MEAN usando indicador flotante fuera del ancho del tiempo -->
     <!-- v3.0.1.52: INT siempre visible. Si diff/gap viene en vueltas (+1 L/+2 L/+1 V), se muestra tal cual (sin convertir a segundos). -->
 <style>
@@ -1499,7 +1499,7 @@ html[data-theme="t21"] .card:after{
     </div>
 
 
-    <div class="ver" id="verText">Vics_Smart_Raceboard_v3.0.1.88</div>
+    <div class="ver" id="verText">Vics_Smart_Raceboard_v3.0.1.89</div>
   </div>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
@@ -1871,7 +1871,7 @@ Notas de limpieza:
 })();
 
 window.prevPosByKey = window.prevPosByKey || new Map();
-  const RACEBOARD_VERSION = "Vics_Smart_Raceboard_v3.0.1.88";
+  const RACEBOARD_VERSION = "Vics_Smart_Raceboard_v3.0.1.89";
   window.RACEBOARD_VERSION = RACEBOARD_VERSION;
   const elRaceName = document.getElementById("raceName");
   const elRN1 = document.getElementById("rn1");
@@ -2975,7 +2975,7 @@ function updateRow(row, r, bestLapMs, leaderLaps, intervalStr){
   const meanSrc = (r.meanMs ?? r.meanLapMs ?? r.meanLapTimeMs ?? r.meanTimeMs ?? r.meanTimeFmt ?? r.meanTime ?? r.meanLapTimeFmt ?? r.meanLapTime ?? r.mean ?? r.avgLapMs ?? r.avgMs ?? r.avgLapTimeMs ?? r.avgTimeMs ?? r.avgLapTimeFmt ?? r.avgLapTime ?? r.avgTimeFmt ?? r.avgTime ?? r.paceMs ?? r.paceLapMs ?? r.paceLapTimeMs ?? r.paceTimeMs ?? r.paceTimeFmt ?? r.paceTime ?? r.paceLapTimeFmt ?? r.paceLapTime ?? r.pace ?? "");
   let meanMsVal = 0;
   if(typeof meanSrc === "number" && isFinite(meanSrc) && meanSrc > 0){
-    meanMsVal = meanSrc < 10000 ? Math.round(meanSrc * 1000) : Math.round(meanSrc);
+    meanMsVal = Number.isInteger(meanSrc) ? Math.round(meanSrc) : Math.round(meanSrc * 1000);
   }else{
     meanMsVal = parseLapTimeToMs(meanSrc);
   }
