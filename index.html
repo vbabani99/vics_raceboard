@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Vics_Smart_Raceboard_v3.0.1.89</title>
+  <title>vics_Smart_Talk_Raceboard_v0.0.0.9</title>
   <!-- v3.0.1.88: alinea LAST con BEST/MEAN usando indicador flotante fuera del ancho del tiempo -->
     <!-- v3.0.1.52: INT siempre visible. Si diff/gap viene en vueltas (+1 L/+2 L/+1 V), se muestra tal cual (sin convertir a segundos). -->
 <style>
@@ -282,6 +282,9 @@ html,body{
   background: rgba(255,255,255,0.25);
   border-radius: 2px;
 }
+.pilotName.hasBlue .flagBlue{display:inline-block !important;}
+.nm1{display:flex !important;align-items:center;gap:6px;min-width:0;}
+.nm1First{flex:1 1 auto;min-width:0;}
 .right{
   justify-self: end;
   transform: translateY(-2px);
@@ -1255,6 +1258,18 @@ to{ transform: translateY(18px); }
 }
 .themeBtn.isAuto{ box-shadow: 0 0 18px rgba(var(--accentRgb),0.24); }
 
+.voiceBtn.isOn{
+  border-color: rgba(72,255,164,0.42);
+  box-shadow: 0 0 18px rgba(72,255,164,0.20);
+}
+.voiceBtn.isBusy{
+  border-color: rgba(255,203,77,0.44);
+  box-shadow: 0 0 18px rgba(255,203,77,0.22);
+}
+.voiceBtn.isMuted{
+  opacity:0.70;
+}
+
 
 
 
@@ -1476,7 +1491,7 @@ html[data-theme="t21"] .card:after{
         </div>
       </div>
       <div class="badgeCol"><div class="liveBadge" id="liveBadge" title="LIVE"></div>
-        <button class="themeBtn" id="themeBtn" type="button" title="Cambiar tema">TEMA</button></div>
+        <button class="themeBtn voiceBtn isMuted" id="voiceBtn" type="button" title="Narrador Microsoft">VOZ OFF</button><button class="themeBtn" id="themeBtn" type="button" title="Cambiar tema">TEMA</button></div>
     </div>
 
     <div class="title" id="titleText"></div>
@@ -1499,7 +1514,7 @@ html[data-theme="t21"] .card:after{
     </div>
 
 
-    <div class="ver" id="verText">Vics_Smart_Raceboard_v3.0.1.89</div>
+    <div class="ver" id="verText">vics_Smart_Talk_Raceboard_v0.0.0.9</div>
   </div>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
@@ -1871,7 +1886,7 @@ Notas de limpieza:
 })();
 
 window.prevPosByKey = window.prevPosByKey || new Map();
-  const RACEBOARD_VERSION = "Vics_Smart_Raceboard_v3.0.1.89";
+  const RACEBOARD_VERSION = "vics_Smart_Talk_Raceboard_v0.0.0.9";
   window.RACEBOARD_VERSION = RACEBOARD_VERSION;
   const elRaceName = document.getElementById("raceName");
   const elRN1 = document.getElementById("rn1");
@@ -2297,6 +2312,111 @@ scheduleModeTick();
     }
   }
 
+  function _truthyLike(v){
+    if(v === true || v === 1) return true;
+    const s = String(v == null ? '' : v).trim().toLowerCase();
+    if(!s) return false;
+    return /^(1|true|yes|y|si|sí|on|blue|azul)$/i.test(s);
+  }
+
+  function _textHasBlueFlag(v){
+    const s = String(v == null ? '' : v).trim().toLowerCase();
+    if(!s) return false;
+    return /(blue\s*flag|flag\s*blue|bandera\s*azul|\bazul\b|\bblue\b)/i.test(s);
+  }
+
+  function _blueLapDiffFromText(v){
+    const s = String(v == null ? '' : v).trim().toUpperCase();
+    if(!s) return 0;
+    const m = s.match(/\+\s*(\d+)\s*V\b/);
+    return m ? (Number(m[1]) || 0) : 0;
+  }
+
+  function _isTopBlueProximity(row, rows, st){
+    try{
+      const map = (window.__lastPassEvents instanceof Map) ? window.__lastPassEvents : null;
+      if(!map || !row || !Array.isArray(rows) || !rows.length) return false;
+      const rk = keyFor(row);
+      if(!rk) return false;
+      const re = map.get(rk);
+      if(!re || !isFinite(re.time)) return false;
+
+      const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+      const activeMs = (st === 'final' || st === 'race') ? 5500 : 3800;
+      if((now - Number(re.time || 0)) > activeMs) return false;
+
+      const BLUE_PROX_MS = 800;
+      const rLap = Number(re.lap || row.laps || 0) || 0;
+      const top3 = rows.filter(x => x && Number(x.pos || 999) >= 1 && Number(x.pos || 999) <= 3).slice(0,3);
+      for(const laper of top3){
+        if(!laper) continue;
+        const lk = keyFor(laper);
+        if(!lk || lk === rk) continue;
+        const le = map.get(lk);
+        if(!le || !isFinite(le.time)) continue;
+        if(le.time <= re.time) continue;
+        const delta = Number(le.time) - Number(re.time);
+        if(delta <= 0 || delta > BLUE_PROX_MS) continue;
+        const laperLap = Number(le.lap || laper.laps || 0) || 0;
+        if((laperLap - rLap) >= 1) return true;
+      }
+      return false;
+    }catch(e){
+      return false;
+    }
+  }
+
+  function detectRowBlueFlag(row, rows, data, race){
+    try{
+      if(!row) return false;
+      const explicitKeys = ['blueFlag','blueflag','flagBlue','flag_blue','blue_flag','isBlueFlag','hasBlueFlag','needsBlueFlag','marshalBlue','currentBlueFlag'];
+      const textKeys = ['flag','flags','flagState','currentFlag','marshalFlag','warning','status','state'];
+      const sources = [row, row._src].filter(Boolean);
+      for(const src of sources){
+        for(const k of explicitKeys){
+          if(src && Object.prototype.hasOwnProperty.call(src, k) && _truthyLike(src[k])) return true;
+        }
+        for(const k of textKeys){
+          if(src && Object.prototype.hasOwnProperty.call(src, k) && _textHasBlueFlag(src[k])) return true;
+        }
+      }
+      const extrasText = []
+        .concat(Array.isArray(row.extraRowKeys) ? row.extraRowKeys : [])
+        .concat(Array.isArray(row.extraRowPreview) ? row.extraRowPreview : [])
+        .join(' ');
+      if(_textHasBlueFlag(extrasText)) return true;
+
+      const st = String(pickSessionType(data, race) || '').toLowerCase();
+      const isQualiLike = (st === 'quali' || st === 'practice');
+      const isFinalLike = (st === 'final' || st === 'race');
+
+      const myLaps = Number(row.laps || row.lapcount || 0) || 0;
+      const leaderLaps = Number((((rows && rows[0]) ? rows[0].laps : 0) || 0)) || 0;
+      const lapDiffFeed = Math.max(
+        _blueLapDiffFromText(row.diff),
+        _blueLapDiffFromText(row.gap),
+        _blueLapDiffFromText(row.flagState),
+        _blueLapDiffFromText(extrasText)
+      );
+      const lapDiffLeader = Math.max(0, leaderLaps - myLaps);
+      const lapDiff = Math.max(lapDiffFeed, lapDiffLeader);
+      const nearTopBlue = _isTopBlueProximity(row, rows, st);
+
+      if(isQualiLike){
+        // En clasificación/práctica la azul es tráfico de punta real.
+        // No basta con venir una vuelta abajo en la tabla.
+        return !!nearTopBlue;
+      }
+
+      if(isFinalLike){
+        // En finales sí se pintan los ya lapeados. Si además viene el rápido cerca,
+        // queda alineado con el comportamiento del spotter.
+        return !!(lapDiff >= 1 || nearTopBlue);
+      }
+    }catch(e){}
+    return false;
+  }
+
   function prettySessionName(v){
     return String(v || "").replace(/_/g, " ").trim();
   }
@@ -2491,67 +2611,206 @@ function pickClockValue(data, race){
     return `${m}:${String(s).padStart(2,"0")}`;
   }
 
-  // ===== Reloj continuo (no depende del refresh de Firebase) =====
-  window.__clockElapsedBaseMs = window.__clockElapsedBaseMs || 0;
-  window.__clockBaseTs = window.__clockBaseTs || 0;
-  window.__clockRunning = window.__clockRunning || false;
-  window.__lastFeedTs = window.__lastFeedTs || 0;
+  // ===== Reloj continuo estable (desacoplado del refresh de Firebase) =====
+  window.__clockState = window.__clockState || {
+    elapsedBaseMs: 0,
+    showBaseMs: 0,
+    clockSource: 'elapsed',
+    baseTs: 0,
+    durationMs: 0,
+    running: false,
+    raceKey: '',
+    lastFeedElapsedMs: 0,
+    lastFeedShowMs: 0,
+    lastFeedAt: 0,
+    lastShown: ''
+  };
 
-  function setClockBase(elapsedMs, durationMs){
-    elapsedMs = Number(elapsedMs||0);
-    if(!isFinite(elapsedMs) || elapsedMs < 0){ elapsedMs = 0; }
-    durationMs = Number(durationMs||0);
-    if(!isFinite(durationMs) || durationMs <= 0){ durationMs = 0; }
-    window.__clockElapsedBaseMs = elapsedMs;
-    window.__clockBaseTs = Date.now();
-    window.__clockDurationMs = durationMs;
-    window.__clockRunning = true;
-    window.__lastFeedTs = Date.now();
-    startClockTicker();
+  function renderClockNow(){
+    if(!elRaceClockText) return;
+    const st = window.__clockState || {};
+    if(!st.running){
+      if(st.lastShown !== '--:--'){
+        elRaceClockText.classList.remove('critical','finished');
+        elRaceClockText.textContent = '--:--';
+        st.lastShown = '--:--';
+      }
+      return;
+    }
+
+    const now = Date.now();
+    const ts = Number(st.baseTs || now);
+    const dur = Number(st.durationMs || 0);
+    const source = String(st.clockSource || 'elapsed');
+    let showMs = 0;
+
+    if(source === 'master'){
+      const showBase = Number(st.showBaseMs || 0);
+      showMs = showBase - Math.max(0, now - ts);
+      if(!isFinite(showMs)) showMs = 0;
+      showMs = Math.max(0, showMs);
+    }else{
+      const base = Number(st.elapsedBaseMs || 0);
+      let elapsed = base + Math.max(0, now - ts);
+      if(!isFinite(elapsed) || elapsed < 0) elapsed = 0;
+      if(dur > 0 && elapsed > dur * 3) elapsed = 0;
+      showMs = dur > 0 ? Math.max(0, dur - elapsed) : elapsed;
+    }
+
+    if(dur > 0 && showMs <= 0){
+      showMs = 0;
+      st.running = false;
+      elRaceClockText.classList.remove('critical');
+      elRaceClockText.classList.add('finished');
+      const txt = fmtClockCompact(showMs);
+      if(txt !== st.lastShown){
+        elRaceClockText.textContent = txt;
+        st.lastShown = txt;
+      }
+      return;
+    }
+
+    elRaceClockText.classList.remove('finished');
+    elRaceClockText.classList.toggle('critical', (showMs > 0 && showMs <= 10000));
+    const txt = fmtClockCompact(showMs);
+    if(txt !== st.lastShown){
+      elRaceClockText.textContent = txt;
+      st.lastShown = txt;
+    }
   }
 
-  function stopClockTicker(){
-    window.__clockRunning = false;
+  function hardSyncClock(elapsedMs, durationMs, raceKey, masterShowMs){
+    const st = window.__clockState || (window.__clockState = {});
+    elapsedMs = Number(elapsedMs || 0);
+    durationMs = Number(durationMs || 0);
+    masterShowMs = Number(masterShowMs);
+    if(!isFinite(elapsedMs) || elapsedMs < 0) elapsedMs = 0;
+    if(!isFinite(durationMs) || durationMs < 0) durationMs = 0;
+    const useMaster = isFinite(masterShowMs) && masterShowMs >= 0;
+    st.elapsedBaseMs = elapsedMs;
+    st.showBaseMs = useMaster ? masterShowMs : Math.max(0, durationMs > 0 ? (durationMs - elapsedMs) : elapsedMs);
+    st.clockSource = useMaster ? 'master' : 'elapsed';
+    st.baseTs = Date.now();
+    st.durationMs = durationMs;
+    st.running = true;
+    st.raceKey = String(raceKey || '');
+    st.lastFeedElapsedMs = elapsedMs;
+    st.lastFeedShowMs = st.showBaseMs;
+    st.lastFeedAt = Date.now();
+    startClockTicker();
+    renderClockNow();
+  }
+
+  function syncClockBase(elapsedMs, durationMs, raceKey, masterShowMs){
+    const st = window.__clockState || (window.__clockState = {});
+    const now = Date.now();
+    elapsedMs = Number(elapsedMs || 0);
+    durationMs = Number(durationMs || 0);
+    masterShowMs = Number(masterShowMs);
+    if(!isFinite(elapsedMs) || elapsedMs < 0) elapsedMs = 0;
+    if(!isFinite(durationMs) || durationMs < 0) durationMs = 0;
+    const rk = String(raceKey || window.__raceKey || '');
+    const useMaster = isFinite(masterShowMs) && masterShowMs >= 0;
+
+    const needHard = !st.baseTs
+      || (rk && st.raceKey && st.raceKey !== rk)
+      || Math.abs((Number(st.durationMs || 0)) - durationMs) > 500
+      || String(st.clockSource || 'elapsed') !== (useMaster ? 'master' : 'elapsed')
+      || (elapsedMs === 0 && Number(st.lastFeedElapsedMs || 0) > 10000);
+
+    if(needHard){
+      hardSyncClock(elapsedMs, durationMs, rk, masterShowMs);
+      return;
+    }
+
+    if(useMaster){
+      const localShow = Number(st.showBaseMs || masterShowMs) - Math.max(0, now - Number(st.baseTs || now));
+      let drift = masterShowMs - localShow;
+      if(drift < 0 && Math.abs(drift) < 1200){
+        drift = 0;
+        masterShowMs = localShow;
+      }
+      if(Math.abs(drift) > 2500){
+        hardSyncClock(elapsedMs, durationMs, rk, masterShowMs);
+        return;
+      }
+      const soften = Math.abs(drift) > 250 ? 0.35 : 0;
+      st.showBaseMs = Math.max(0, localShow + (drift * soften));
+      st.elapsedBaseMs = elapsedMs;
+      st.clockSource = 'master';
+      st.baseTs = now;
+      st.durationMs = durationMs;
+      st.running = true;
+      st.raceKey = rk || st.raceKey || '';
+      st.lastFeedElapsedMs = elapsedMs;
+      st.lastFeedShowMs = masterShowMs;
+      st.lastFeedAt = now;
+      startClockTicker();
+      renderClockNow();
+      return;
+    }
+
+    const localElapsed = Number(st.elapsedBaseMs || 0) + Math.max(0, now - Number(st.baseTs || now));
+    let drift = elapsedMs - localElapsed;
+
+    if(drift < 0 && Math.abs(drift) < 1200){
+      drift = 0;
+      elapsedMs = localElapsed;
+    }
+
+    if(Math.abs(drift) > 2500){
+      hardSyncClock(elapsedMs, durationMs, rk, masterShowMs);
+      return;
+    }
+
+    const soften = Math.abs(drift) > 250 ? 0.35 : 0;
+    st.elapsedBaseMs = localElapsed + (drift * soften);
+    st.showBaseMs = Math.max(0, durationMs > 0 ? (durationMs - st.elapsedBaseMs) : st.elapsedBaseMs);
+    st.clockSource = 'elapsed';
+    st.baseTs = now;
+    st.durationMs = durationMs;
+    st.running = true;
+    st.raceKey = rk || st.raceKey || '';
+    st.lastFeedElapsedMs = elapsedMs;
+    st.lastFeedShowMs = st.showBaseMs;
+    st.lastFeedAt = now;
+    startClockTicker();
+    renderClockNow();
+  }
+
+  function resetClockState(showBlank){
+    const st = window.__clockState || (window.__clockState = {});
+    st.elapsedBaseMs = 0;
+    st.showBaseMs = 0;
+    st.clockSource = 'elapsed';
+    st.baseTs = 0;
+    st.durationMs = 0;
+    st.running = false;
+    st.raceKey = '';
+    st.lastFeedElapsedMs = 0;
+    st.lastFeedShowMs = 0;
+    st.lastFeedAt = 0;
+    st.lastShown = showBlank ? '--:--' : '';
+    if(elRaceClockText && showBlank){
+      elRaceClockText.classList.remove('critical','finished');
+      elRaceClockText.textContent = '--:--';
+    }
+  }
+
+  function stopClockTicker(showBlank){
+    const st = window.__clockState || (window.__clockState = {});
+    st.running = false;
+    if(showBlank){
+      st.lastShown = '';
+      renderClockNow();
+    }
   }
 
   function startClockTicker(){
     if(window.__clockTickTimer) return;
     window.__clockTickTimer = setInterval(function(){
-      if(!elRaceClockText) return;
-
-      const dur = Number(window.__clockDurationMs||0);
-
-      if(!window.__clockRunning){
-        // si ya esta terminado, conserva rojo; si no, solo deja verde
-        return;
-      }
-
-      const base = Number(window.__clockElapsedBaseMs||0);
-      const ts = Number(window.__clockBaseTs||0);
-      const now = Date.now();
-      let elapsed = base + Math.max(0, now - ts);
-
-      // Si el elapsed viene disparado (dato raro al arrancar), reinicia
-      if(dur > 0 && elapsed > dur*3) elapsed = 0;
-
-      let showMs = (dur > 0) ? Math.max(0, dur - elapsed) : elapsed;
-
-      // Termino: countdown llego a 0 (solo si hay duracion)
-      if(dur > 0 && showMs <= 0){
-        showMs = 0;
-        window.__clockRunning = false;
-        elRaceClockText.classList.remove('critical');
-        elRaceClockText.classList.add('finished');
-        elRaceClockText.textContent = fmtClockCompact(showMs);
-        return;
-      }
-
-      // Corriendo: siempre verde
-      elRaceClockText.classList.remove('finished');
-      // Ultimos 10s: efecto arcade
-      elRaceClockText.classList.toggle('critical', (dur>0 && showMs>0 && showMs<=10000));
-      elRaceClockText.textContent = fmtClockCompact(showMs);
-    }, 200);
+      renderClockNow();
+    }, 125);
   }
 
   function pickRaceTime(data, race){
@@ -2832,6 +3091,7 @@ rowBar.appendChild(lapBar);
   row.appendChild(right);
   row.appendChild(rowBar);
 
+  const flagBlue = posDelta;
   const nm1First = l1.querySelector(".nm1First");
   const nm2Last = l2.querySelector(".nm2Last");
   const llMiniTop = stTop.querySelector(".llMiniTop");
@@ -2843,7 +3103,7 @@ rowBar.appendChild(lapBar);
   const blMini = stBot.querySelector(".blMini");
   const sepDash2 = stBot.querySelector(".sepDash2");
 
-  row._refs = { pos, posNum, posDelta, nmWrap, l1, l2, nm1First, nm2Last, llMiniTop, lapsMiniTop, sepDash, estMiniBot, blMini, rotLabel, rotValue, sepDash2, lapBarFill, lapBarTime, lapGhost, lapGhostBest, stats, right, rightTop, rightInt };
+  row._refs = { pos, posNum, posDelta, nmWrap, l1, l2, flagBlue, nm1First, nm2Last, llMiniTop, lapsMiniTop, sepDash, estMiniBot, blMini, rotLabel, rotValue, sepDash2, lapBarFill, lapBarTime, lapGhost, lapGhostBest, stats, right, rightTop, rightInt };
   return row;
 }
 
@@ -2928,24 +3188,37 @@ function updateRow(row, r, bestLapMs, leaderLaps, intervalStr){
 
   // POS delta (up/down)
   // POS delta (up/down)
+  const hasBlueFlag = (function(v){
+    if(v === true || v === 1) return true;
+    const s = String(v ?? '').trim().toLowerCase();
+    return s === '1' || s === 'true' || s === 'yes' || s === 'y' || s === 'si' || s === 'sí' || s === 'blue' || s === 'blueflag';
+  })(r.blueFlag);
+
   if(refs.posDelta){
-    // If pilot finished, show checkered flag in posBox and keep it
+    // prioridad visual del slot lateral: cuadros > movimiento > bandera azul
     if(row.__finished){
       refs.posDelta.innerHTML = '&#127937;';
       refs.posDelta.className = 'posDelta finish';
       refs.posDelta.style.opacity = '1';
+      refs.posDelta.title = 'Bandera a cuadros';
     } else if(cue){
       refs.posDelta.textContent = (cue.dir === 'up' ? ('\u25B2' + cue.delta) : ('\u25BC' + cue.delta));
       refs.posDelta.className = 'posDelta ' + (cue.dir === 'up' ? 'up' : 'down');
       refs.posDelta.style.opacity = '1';
-      // restart animation only when a NEW cue is created
+      refs.posDelta.title = '';
       if(row.__cueAnimId !== cue.id){
         row.__cueAnimId = cue.id;
       }
+    } else if(hasBlueFlag){
+      refs.posDelta.innerHTML = '<span class="flagBlue" aria-hidden="true"></span>';
+      refs.posDelta.className = 'posDelta blue';
+      refs.posDelta.style.opacity = '1';
+      refs.posDelta.title = 'Bandera azul';
     } else {
       refs.posDelta.textContent = '';
       refs.posDelta.className = 'posDelta';
       refs.posDelta.style.opacity = '0';
+      refs.posDelta.title = '';
     }
   }
 
@@ -3015,6 +3288,7 @@ function updateRow(row, r, bestLapMs, leaderLaps, intervalStr){
 
   if(refs.nm1First) refs.nm1First.textContent = firstTxt;
   else refs.l1.textContent = firstTxt;
+
 
   // last lap + LAPS mini (normalizado, separador controlado por span)
   const lapsStr = (r.laps!==undefined && r.laps!==null ? String(r.laps).trim() : "");
@@ -3137,6 +3411,11 @@ const lastChanged = (prevLast !== null && lastMsVal > 0 && lastMsVal !== prevLas
 if(laps>0) lapMap.set(k, laps);
 if(lastLapTxt) rawMap.set(k, lastLapTxt);
 if(lapInc1){
+  try{
+    const passMap = (window.__lastPassEvents || (window.__lastPassEvents = new Map()));
+    const tNow = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    passMap.set(k, { time: tNow, lap: laps });
+  }catch(e){}
   // Finish detection uses pilot total time from feed field "time" (per pilot).
   // We only evaluate on lap-close (lapInc1 && lastChanged) so finish is painted on the last pass.
   const targetMs = Number(window.__targetRaceMs||0) || 0;
@@ -3466,11 +3745,14 @@ function applyFinishState(row){
     window.__prevRaceTimeMs = null;
     window.__statsRotateEpoch = Date.now();
     try{ applyStatsRotation(true); }catch(e){}
+    try{ resetClockState(true); }catch(e){}
+    try{ window.TRNarrator && window.TRNarrator.reset && window.TRNarrator.reset(reason); }catch(e){}
 
     try{ window.prevLastLapMsByKey && window.prevLastLapMsByKey.clear(); }catch(e){}
     try{ window.prevLastLapTrendByKey && window.prevLastLapTrendByKey.clear(); }catch(e){}
     try{ window.prevLastLapRawByKey && window.prevLastLapRawByKey.clear(); }catch(e){}
     try{ window.prevLapCountByKey && window.prevLapCountByKey.clear(); }catch(e){}
+    try{ window.__lastPassEvents && window.__lastPassEvents.clear(); }catch(e){}
     try{ window.posCueByKey && window.posCueByKey.clear(); }catch(e){}
     try{ window.prevPosByKey && window.prevPosByKey.clear(); }catch(e){}
 
@@ -3543,7 +3825,7 @@ function startListener(){
 
     unsub = raceRef.onSnapshot((snap) => {
       const _exists = (typeof snap.exists === "function" ? snap.exists() : snap.exists);
-      if (!_exists) { lastFeedTs = 0; setLive(false); return; }
+      if (!_exists) { lastFeedTs = 0; setLive(false); try{ resetClockState(true); }catch(e){} return; }
       lastFeedTs = Date.now();
       setLive(true);
       const data = snap.data();
@@ -3566,15 +3848,16 @@ function startListener(){
 
       // Reloj + modo (PRACTICA/CARRERA)
       try{
-        const clkRaw = pickClockValue(data, race);
         const durationMs = pickRaceDurationMs(data, race);
         const elapsedMs = pickSessionElapsedMs(data, race, durationMs);
-        if(clkRaw==null && !(elapsedMs > 0)){
-          if(elRaceClockText) elRaceClockText.textContent = "--:--";
-          stopClockTicker();
+        const remainingMs = pickSessionRemainingMs(data, race, durationMs, elapsedMs);
+        const safeRemainingMs = (remainingMs != null && isFinite(Number(remainingMs))) ? Math.max(0, Number(remainingMs)) : NaN;
+        const raceClockKey = String((race && race.raceName) || (data && data.raceName) || window.__raceKey || '');
+        const canShowClock = (safeRemainingMs >= 0) || (durationMs > 0) || (elapsedMs > 0);
+        if(!canShowClock){
+          resetClockState(true);
         }else{
-          setClockBase(elapsedMs, durationMs);
-          if(elRaceClockText) elRaceClockText.textContent = fmtClockCompact((durationMs>0)?Math.max(0, durationMs - elapsedMs):elapsedMs);
+          syncClockBase(elapsedMs, durationMs, raceClockKey, safeRemainingMs);
         }
 
         const pr = pickPracticeFlag(data, race);
@@ -3639,6 +3922,9 @@ function startListener(){
             paceTimeFmt: (x.paceTimeFmt ?? ""),
             driverNumber: (x.driverNumber ?? x.racerNumber ?? ""),
             driverName: _fixMojibake(String(x.driverName ?? x.racerName ?? x.name ?? "")),
+            blueFlag: (x.blueFlag ?? x.blueflag ?? x.flagBlue ?? x.flag_blue ?? x.blue_flag ?? x.isBlueFlag ?? x.hasBlueFlag ?? x.needsBlueFlag ?? x.marshalBlue ?? x.currentBlueFlag ?? null),
+            flagState: (x.flag ?? x.flags ?? x.flagState ?? x.currentFlag ?? x.marshalFlag ?? x.warning ?? x.status ?? x.state ?? ""),
+            _src: x,
             sourceRowKeys: Array.isArray(x.sourceRowKeys) ? x.sourceRowKeys : [],
             extraRowKeys: Array.isArray(x.extraRowKeys) ? x.extraRowKeys : [],
             extraRowPreview: Array.isArray(x.extraRowPreview) ? x.extraRowPreview : [],
@@ -3647,6 +3933,10 @@ function startListener(){
         })
         .filter(r => r.pos > 0)
         .sort((a,b) => a.pos - b.pos);
+
+      rows.forEach(r => {
+        r.blueFlag = detectRowBlueFlag(r, rows, data, race);
+      });
 
       updateRaceMetaInfo(data, race, rows);
 
@@ -3682,6 +3972,7 @@ function startListener(){
         }
       }catch(e){}
 
+      try{ window.TRNarrator && window.TRNarrator.ingest && window.TRNarrator.ingest(data, race, rows); }catch(e){}
       render(rows);
     }, (err) => {
       console.error("Firestore onSnapshot error:", err);
@@ -3691,6 +3982,867 @@ function startListener(){
   }
 
 
+// ===== Narrador Live Microsoft-only =====
+(function(){
+  const INTERNAL_TTS_RATE = 1.7;
+  const LS_KEY_ENABLED = 'trNarratorEnabledV1';
+  const MAX_QUEUE = 6;
+  const narrator = window.TRNarrator = window.TRNarrator || {};
+  const state = narrator.state = narrator.state || {
+    enabled:false,
+    voices:[],
+    roles:{primary:null,secondary:null,result:null},
+    queue:[],
+    speaking:false,
+    current:null,
+    lastBySig:new Map(),
+    bootstrapped:false,
+    prev:null,
+    lastCtx:null,
+    forceResync:false,
+    unlockDone:false,
+    watchdogId:0,
+    voiceBurstDone:false,
+    lastSpokenAt:0,
+    lastHeartbeatAt:0,
+    sessionMarks:new Set(),
+    phraseTurns:new Map(),
+    sceneMemory:new Map()
+  };
+
+  function elBtn(){ return document.getElementById('voiceBtn'); }
+  function safeLang(v){ return String((v && (v.lang||v.language)) || '').toLowerCase().replace(/_/g,'-'); }
+  function isMicrosoftVoice(v){
+    const name = String((v && v.name) || '');
+    const uri = String((v && v.voiceURI) || '');
+    return /microsoft/i.test(name) || /microsoft/i.test(uri);
+  }
+  function voiceScore(v){
+    const lang = safeLang(v);
+    let score = 0;
+    if(lang === 'es-mx') score += 1000;
+    else if(lang === 'es-es') score += 900;
+    else if(lang.startsWith('es')) score += 780;
+    if((v && v.default) === true) score += 25;
+    const name = String((v && v.name) || '');
+    if(/dalia|jorge|sabina|helena/i.test(name)) score += 12;
+    return score;
+  }
+  function loadVoices(){
+    let voices = [];
+    try{ voices = (window.speechSynthesis && window.speechSynthesis.getVoices()) || []; }catch(e){ voices = []; }
+    voices = voices.filter(isMicrosoftVoice).sort((a,b)=>voiceScore(b)-voiceScore(a));
+    state.voices = voices;
+    state.roles.primary = voices[0] || null;
+    state.roles.secondary = voices[1] || voices[0] || null;
+    state.roles.result = voices[2] || voices[1] || voices[0] || null;
+    updateButton();
+    return voices;
+  }
+  function refreshVoicesBurst(){
+    loadVoices();
+    if(state.voiceBurstDone) return;
+    state.voiceBurstDone = true;
+    [150, 600, 1500, 3200].forEach(ms => {
+      setTimeout(() => {
+        loadVoices();
+        if(state.enabled && !state.speaking && state.queue.length) speakNext();
+      }, ms);
+    });
+  }
+  function pickVoice(role){
+    if(role === 'result') return state.roles.result || state.roles.primary;
+    if(role === 'energy') return state.roles.secondary || state.roles.primary;
+    return state.roles.primary || state.roles.secondary || state.roles.result || null;
+  }
+  function updateButton(){
+    const btn = elBtn();
+    if(!btn) return;
+    const hasVoice = !!(state.roles.primary || state.roles.secondary || state.roles.result);
+    const on = !!state.enabled;
+    btn.classList.toggle('isOn', on && hasVoice);
+    btn.classList.toggle('isBusy', !!state.speaking);
+    btn.classList.toggle('isMuted', !on || !hasVoice);
+    if(!hasVoice) btn.textContent = 'VOZ N/A';
+    else if(!on) btn.textContent = 'VOZ OFF';
+    else btn.textContent = 'VOZ ON';
+    const cur = state.current && state.current.voiceName ? ` | ${state.current.voiceName}` : '';
+    btn.title = hasVoice ? ('Narrador Microsoft' + cur) : 'No hay voces Microsoft disponibles';
+  }
+  function speechAvailable(){
+    return !!(window.speechSynthesis && typeof SpeechSynthesisUtterance !== 'undefined');
+  }
+  function cancelSpeech(){
+    try{ window.speechSynthesis && window.speechSynthesis.cancel && window.speechSynthesis.cancel(); }catch(e){}
+    state.queue = [];
+    state.speaking = false;
+    state.current = null;
+    updateButton();
+  }
+  function clearQueueSoft(){
+    state.queue = [];
+  }
+  function normalizeText(s){
+    return String(s||'').replace(/\s+/g,' ').trim();
+  }
+  function cleanRecent(){
+    const now = Date.now();
+    for(const [k,ts] of state.lastBySig.entries()) if(now - ts > 45000) state.lastBySig.delete(k);
+  }
+  function joinWithY(parts){
+    parts = (parts||[]).filter(Boolean);
+    if(!parts.length) return '';
+    if(parts.length === 1) return parts[0];
+    if(parts.length === 2) return `${parts[0]} y ${parts[1]}`;
+    return `${parts.slice(0,-1).join(', ')} y ${parts[parts.length-1]}`;
+  }
+  function plural(n, one, many){ return Number(n) === 1 ? one : many; }
+  function lapsText(n){
+    n = Number(n||0) || 0;
+    if(n <= 0) return '';
+    return `${n} ${plural(n,'vuelta','vueltas')}`;
+  }
+  function speakLapTimeMs(ms){
+    ms = Number(ms||0);
+    if(!isFinite(ms) || ms <= 0) return '';
+    const totalSec = Math.floor(ms/1000);
+    const minutes = Math.floor(totalSec/60);
+    const seconds = totalSec % 60;
+    const cent = Math.floor((ms % 1000) / 10);
+    const out = [];
+    if(minutes > 0) out.push(`${minutes} ${plural(minutes,'minuto','minutos')}`);
+    if(seconds > 0 || minutes > 0) out.push(`${seconds} ${plural(seconds,'segundo','segundos')}`);
+    out.push(`${cent} ${plural(cent,'centésima','centésimas')}`);
+    return joinWithY(out);
+  }
+  function speakClockMs(ms){
+    ms = Number(ms||0);
+    if(!isFinite(ms) || ms <= 0) return '0 segundos';
+    const totalSec = Math.max(0, Math.floor(ms/1000));
+    const minutes = Math.floor(totalSec/60);
+    const seconds = totalSec % 60;
+    const out = [];
+    if(minutes > 0) out.push(`${minutes} ${plural(minutes,'minuto','minutos')}`);
+    if(seconds > 0 || !out.length) out.push(`${seconds} ${plural(seconds,'segundo','segundos')}`);
+    return joinWithY(out);
+  }
+  function speakLapsAndTime(laps, ms){
+    const lapsPart = lapsText(laps);
+    const timePart = speakLapTimeMs(ms);
+    if(lapsPart && timePart) return `${lapsPart} en ${timePart}`;
+    return lapsPart || timePart || '';
+  }
+  function parseMaybeMs(v){
+    if(v == null || v === '') return 0;
+    if(typeof v === 'number' && isFinite(v)) return Math.round(v);
+    const s = String(v).trim();
+    if(!s) return 0;
+    if(/^\d+(?:\.\d+)?$/.test(s)){
+      const num = Number(s);
+      if(!isFinite(num) || num <= 0) return 0;
+      return num > 1000 ? Math.round(num) : Math.round(num * 1000);
+    }
+    try{
+      const ms = parseRaceTimeToMs(s);
+      return Number(ms||0) || 0;
+    }catch(e){
+      return 0;
+    }
+  }
+  function asNumber(v){
+    if(v == null || v === '') return 0;
+    const num = Number(String(v).replace(/,/g,'.').replace(/[^0-9.\-]/g,''));
+    return isFinite(num) ? num : 0;
+  }
+  function avgMsOf(r){
+    return Number(r.avgMs || r.meanMs || r.paceMs || 0) || 0;
+  }
+  function estLapsOf(r){
+    const n = asNumber(r.estLapsVal != null ? r.estLapsVal : (r.estLaps ?? r.estLap ?? ''));
+    return n > 0 ? Math.round(n) : 0;
+  }
+  function speedKmhFromLapMs(ms){
+    ms = Number(ms||0);
+    if(!isFinite(ms) || ms <= 0) return 0;
+    const trackMeters = 5;
+    return (trackMeters / (ms/1000)) * 3.6;
+  }
+  function gapSpeech(v){
+    if(v == null) return '';
+    const s = normalizeText(v);
+    if(!s || /^[-–—]+$/.test(s)) return '';
+    const lapMatch = s.match(/^\+?\s*(\d+)\s*(?:V|L|VTA|VUELTA|VUELTAS)\b/i);
+    if(lapMatch){
+      const n = Number(lapMatch[1]||0) || 0;
+      if(n <= 0) return '';
+      if(n === 1) return 'más una vuelta';
+      return `más ${n} vueltas`;
+    }
+    const ms = parseGapMsSafe(s);
+    return ms > 0 ? speakLapTimeMs(ms) : s;
+  }
+  function pickPhrase(key, options){
+    const arr = (options || []).filter(Boolean);
+    if(!arr.length) return '';
+    if(!state.phraseTurns) state.phraseTurns = new Map();
+    const cur = Number(state.phraseTurns.get(key) || 0);
+    state.phraseTurns.set(key, cur + 1);
+    return arr[cur % arr.length];
+  }
+  function runSpeechOf(r){
+    if(!r) return '';
+    return (Number(r.lapsNum||0) > 0 && Number(r.totalMs||0) > 0) ? speakLapsAndTime(r.lapsNum, r.totalMs) : '';
+  }
+  function bestSpeechOf(r){
+    const ms = Number(r && r.bestLapMs || 0) || 0;
+    return ms > 0 ? speakLapTimeMs(ms) : '';
+  }
+  function avgSpeechOf(r){
+    const ms = avgMsOf(r);
+    return ms > 0 ? `Promedio de ${speakLapTimeMs(ms)}.` : '';
+  }
+  function estSpeechOf(r){
+    const laps = estLapsOf(r);
+    return laps > 0 ? `Proyección de ${lapsText(laps)}.` : '';
+  }
+  function speedSpeechOf(r){
+    const baseMs = avgMsOf(r) || Number(r && r.bestLapMs || 0) || 0;
+    const kmh = speedKmhFromLapMs(baseMs);
+    return kmh > 0 ? `Velocidad media de ${kmh.toFixed(1).replace('.',',')} kilómetros por hora.` : '';
+  }
+  function projectedSpeechOf(r, ctx){
+    const laps = estLapsOf(r);
+    const dur = Number(ctx && ctx.durationMs || 0) || 0;
+    if(laps > 0 && dur > 0) return `Proyectado a ${lapsText(laps)} en ${speakClockMs(dur)}.`;
+    if(laps > 0) return `Proyectado a ${lapsText(laps)}.`;
+    return '';
+  }
+  function estimatedSpeechOf(r){
+    const laps = estLapsOf(r);
+    return laps > 0 ? `El estimado se sostiene en ${lapsText(laps)}.` : '';
+  }
+  function topRowsSpeech(ctx){
+    if(!ctx || !Array.isArray(ctx.rows) || !ctx.rows.length) return '';
+    const top = ctx.rows.slice(0,3).map(r => String(r.name||'').trim()).filter(Boolean);
+    if(!top.length) return '';
+    if(top.length === 1) return `Tabla general provisional, ${top[0]}.`;
+    if(top.length === 2) return `Tabla general provisional, ${top[0]} y ${top[1]}.`;
+    return `Tabla general provisional, ${top[0]}, ${top[1]} y ${top[2]}.`;
+  }
+  function topRowsSig(ctx){
+    if(!ctx || !Array.isArray(ctx.rows)) return '';
+    return ctx.rows.slice(0,3).map(r => rowKey(r)).join('|');
+  }
+  function progressSpeechOf(ctx){
+    const pct = Math.round(Number(ctx && ctx.progressPct || 0) || 0);
+    if(pct <= 0) return '';
+    return pickPhrase(`progress-${ctx.sessionType}`, [
+      '',
+      `La sesión ya recorrió ${pct} por ciento de su tiempo.`,
+      `El cronómetro ya consumió ${pct} por ciento de la sesión.`,
+      pct >= 75 ? `La sesión entra en su tramo serio, con ${pct} por ciento recorrido.` : ''
+    ]);
+  }
+  function intervalValueOf(r){
+    if(!r) return '';
+    const cands = [r.interval, r.intervalText, r.intervalTime, r.intervalStr, r.diff, r.diffText];
+    for(const v of cands){
+      const s = normalizeText(v);
+      if(s && !/^[-–—]+$/.test(s)) return s;
+    }
+    return '';
+  }
+  function findBattle(ctx){
+    if(!ctx || !Array.isArray(ctx.rows)) return null;
+    const maxRows = Math.min(ctx.rows.length, 8);
+    let best = null;
+    for(let i=1;i<maxRows;i++){
+      const behind = ctx.rows[i];
+      const ahead = ctx.rows[i-1];
+      const raw = intervalValueOf(behind);
+      const ms = parseGapMsSafe(raw);
+      if(!(ms > 0) || ms > 2200) continue;
+      const pos = Number(behind.posNum || (i+1)) || (i+1);
+      const isLower = pos >= 4;
+      const score = ms + (isLower ? -160 : 120) + Math.max(0, pos-2) * 20;
+      if(!best || score < best.score) best = {ahead, behind, raw, ms, pos, isLower, score};
+    }
+    return best;
+  }
+  function battleContextText(ctx){
+    const b = findBattle(ctx);
+    if(!b) return '';
+    const gapTxt = gapSpeech(b.raw);
+    if(!gapTxt) return '';
+    if(b.isLower){
+      return pickPhrase(`battle-low-${b.pos}`, [
+        `Más atrás, se aprieta la pelea entre ${b.ahead.name} y ${b.behind.name}. Van separados por ${gapTxt}.`,
+        `Atención en la zona media. ${b.ahead.name} y ${b.behind.name} ruedan con apenas ${gapTxt} de margen.`,
+        `No solo pasa algo en punta. ${b.ahead.name} y ${b.behind.name} van pegados, a ${gapTxt}.`
+      ]);
+    }
+    return pickPhrase(`battle-top-${b.pos}`, [
+      `Se aprieta la batalla entre ${b.ahead.name} y ${b.behind.name}. Apenas los separa ${gapTxt}.`,
+      `${b.behind.name} se viene encima de ${b.ahead.name}. La diferencia es de ${gapTxt}.`,
+      `Hay pelea cerrada entre ${b.ahead.name} y ${b.behind.name}, con ${gapTxt} entre ellos.`
+    ]);
+  }
+  function queueLine(text, opts){
+    text = normalizeText(text);
+    if(!text || !state.enabled) return false;
+    cleanRecent();
+    const o = Object.assign({priority:2, role:'base', ttlMs:14000, dedupeMs:10000, cat:'generic'}, opts||{});
+    const sig = o.sig || `${o.cat}|${text.toLowerCase()}`;
+    const prevTs = state.lastBySig.get(sig) || 0;
+    if(prevTs && (Date.now() - prevTs) < o.dedupeMs) return false;
+    state.lastBySig.set(sig, Date.now());
+    const item = { text, createdAt:Date.now(), priority:o.priority, role:o.role, ttlMs:o.ttlMs, cat:o.cat, sig };
+    if(state.queue.length >= MAX_QUEUE){
+      const lowIdx = state.queue.findIndex(x => x.priority < item.priority);
+      if(lowIdx >= 0) state.queue.splice(lowIdx,1);
+      else return false;
+    }
+    if(item.priority >= 4) state.queue = state.queue.filter(x => x.priority >= item.priority);
+    state.queue.push(item);
+    state.queue.sort((a,b)=> (b.priority-a.priority) || (a.createdAt-b.createdAt));
+    speakNext();
+    return true;
+  }
+  function queueCurrentContext(ctx, reason){
+    if(!ctx || !state.enabled) return false;
+    const why = String(reason||'now');
+    const sess = describeSession(ctx);
+    const capSess = sess.charAt(0).toUpperCase() + sess.slice(1);
+    const leader = ctx.rows && ctx.rows[0] ? ctx.rows[0] : null;
+    const rem = ctx.remainingMs > 0 ? ` Restan ${speakClockMs(ctx.remainingMs)}.` : '';
+    if(ctx.sessionType === 'practice'){
+      const runTxt = runSpeechOf(leader);
+      const lead = leader && runTxt ? ` ${leader.name} ya suma ${runTxt}.` : (leader ? ` ${leader.name} ya tiene vueltas registradas.` : '');
+      const avg = leader ? avgSpeechOf(leader) : '';
+      const est = leader ? estimatedSpeechOf(leader) : '';
+      const proj = leader ? projectedSpeechOf(leader, ctx) : '';
+      const ref = ctx.globalBestMs > 0 ? ` La mejor vuelta del grupo está en ${speakLapTimeMs(ctx.globalBestMs)}.` : '';
+      return queueLine(normalizeText(`Narrador listo. ${capSess} en pista.${lead}${ref} ${avg} ${est} ${proj}${rem}`), {priority:4, role:'result', ttlMs:13000, dedupeMs:3000, cat:'current', sig:`current|${ctx.raceKey}|${why}|practice|${ctx.globalBestMs}|${leader && leader.key || ''}`});
+    }
+    if(ctx.sessionType === 'quali'){
+      const pole = leader && runSpeechOf(leader) ? ` Pole provisional para ${leader.name}, con ${runSpeechOf(leader)}.` : (leader ? ` Pole provisional para ${leader.name}.` : '');
+      const proj = leader ? projectedSpeechOf(leader, ctx) : '';
+      const est = leader ? estimatedSpeechOf(leader) : '';
+      const best = (leader && leader.bestLapMs > 0) ? ` Su mejor vuelta es de ${speakLapTimeMs(leader.bestLapMs)}.` : '';
+      const table = topRowsSpeech(ctx);
+      return queueLine(normalizeText(`Narrador listo. Clasificación en pista.${pole}${best} ${proj} ${est} ${table}${rem}`), {priority:4, role:'result', ttlMs:13500, dedupeMs:3000, cat:'current', sig:`current|${ctx.raceKey}|${why}|quali|${ctx.leaderKey}|${ctx.leaderBestMs}|${ctx.leaderLaps}`});
+    }
+    if(leader){
+      const leadTxt = runSpeechOf(leader);
+      const body = leadTxt ? ` Al frente va ${leader.name}, con ${leadTxt}.` : ` Al frente va ${leader.name}.`;
+      const gapPart = leaderGapText(ctx) ? ` La diferencia con el segundo es de ${leaderGapText(ctx)}.` : '';
+      return queueLine(`Narrador listo. Final en pista.${body}${gapPart}${rem}`, {priority:4, role:'result', ttlMs:13500, dedupeMs:3000, cat:'current', sig:`current|${ctx.raceKey}|${why}|final|${ctx.leaderKey}|${ctx.leaderLaps}|${ctx.leaderTotalMs}`});
+    }
+    return queueLine(`Narrador listo. ${capSess} en pista.${rem}`, {priority:4, role:'result', ttlMs:10000, dedupeMs:3000, cat:'current', sig:`current|${ctx.raceKey}|${why}|${ctx.sessionType}`});
+  }
+  function speakNext(){
+    if(!state.enabled || state.speaking) return;
+    if(!state.queue.length){ updateButton(); return; }
+    const now = Date.now();
+    while(state.queue.length){
+      const item = state.queue[0];
+      if((now - item.createdAt) > item.ttlMs){ state.queue.shift(); continue; }
+      const voice = pickVoice(item.role);
+      if(!voice || !speechAvailable()){
+        refreshVoicesBurst();
+        state.speaking = false;
+        state.current = null;
+        updateButton();
+        return;
+      }
+      state.queue.shift();
+      const u = new SpeechSynthesisUtterance(item.text);
+      u.voice = voice;
+      u.lang = voice.lang || 'es-MX';
+      u.rate = INTERNAL_TTS_RATE;
+      u.pitch = 1;
+      u.volume = 1;
+      state.speaking = true;
+      state.lastSpokenAt = Date.now();
+      state.current = { text:item.text, priority:item.priority, voiceName:voice.name||'', cat:item.cat };
+      updateButton();
+      u.onend = function(){
+        state.lastSpokenAt = Date.now();
+        state.speaking = false;
+        state.current = null;
+        updateButton();
+        setTimeout(speakNext, 60);
+      };
+      u.onerror = function(){
+        state.lastSpokenAt = Date.now();
+        state.speaking = false;
+        state.current = null;
+        updateButton();
+        setTimeout(speakNext, 60);
+      };
+      try{
+        window.speechSynthesis.resume && window.speechSynthesis.resume();
+        window.speechSynthesis.speak(u);
+      }catch(e){
+        state.speaking = false;
+        state.current = null;
+        updateButton();
+      }
+      return;
+    }
+    state.speaking = false;
+    state.current = null;
+    updateButton();
+  }
+  function startWatchdog(){
+    if(state.watchdogId) return;
+    state.watchdogId = window.setInterval(function(){
+      if(!speechAvailable()) return;
+      const synth = window.speechSynthesis;
+      const busy = !!(synth && (synth.speaking || synth.pending));
+      if(state.speaking && !busy){
+        state.speaking = false;
+        state.current = null;
+        updateButton();
+        if(state.queue.length) speakNext();
+      }
+    }, 700);
+  }
+  function unlockAndConfirm(){
+    if(!state.enabled || !speechAvailable()) return false;
+    refreshVoicesBurst();
+    const voice = pickVoice('result') || pickVoice('base');
+    if(!voice) return false;
+    try{
+      window.speechSynthesis.cancel && window.speechSynthesis.cancel();
+      window.speechSynthesis.resume && window.speechSynthesis.resume();
+      const u = new SpeechSynthesisUtterance('Narrador activado.');
+      u.voice = voice;
+      u.lang = voice.lang || 'es-MX';
+      u.rate = INTERNAL_TTS_RATE;
+      u.pitch = 1;
+      u.volume = 1;
+      state.speaking = true;
+      state.lastSpokenAt = Date.now();
+      state.current = { text:'Narrador activado.', priority:5, voiceName:voice.name||'', cat:'system' };
+      updateButton();
+      u.onend = function(){
+        state.unlockDone = true;
+        state.lastSpokenAt = Date.now();
+        state.speaking = false;
+        state.current = null;
+        updateButton();
+        setTimeout(function(){ queueCurrentContext(state.lastCtx, 'enable'); speakNext(); }, 90);
+      };
+      u.onerror = function(){
+        state.speaking = false;
+        state.current = null;
+        updateButton();
+        setTimeout(function(){ queueCurrentContext(state.lastCtx, 'enable'); speakNext(); }, 90);
+      };
+      window.speechSynthesis.speak(u);
+      return true;
+    }catch(e){
+      state.speaking = false;
+      state.current = null;
+      updateButton();
+      return false;
+    }
+  }
+  function rowKey(r){ return `${String(r.no||r.driverNumber||'').trim()}|${String(r.name||r.driverName||'').trim().toLowerCase()}`; }
+  function bestMsOfRows(rows){
+    let out = 0;
+    (rows||[]).forEach(r => {
+      const v = Number(r.bestLapMs || r.bestMs || 0) || 0;
+      if(v > 0 && (!out || v < out)) out = v;
+    });
+    return out;
+  }
+  function buildCtx(data, race, rows){
+    const raceKey = String((race && race.raceName) || (data && data.raceName) || window.__raceKey || '').trim();
+    const durationMs = Number(pickRaceDurationMs(data, race) || 0) || 0;
+    const elapsedMs = Number(pickSessionElapsedMs(data, race, durationMs) || 0) || 0;
+    const pickedRemaining = pickSessionRemainingMs(data, race, durationMs, elapsedMs);
+    const remainingMs = (pickedRemaining != null && isFinite(Number(pickedRemaining)))
+      ? Math.max(0, Number(pickedRemaining))
+      : (durationMs > 0 ? Math.max(0, durationMs - elapsedMs) : 0);
+    const progressPct = durationMs > 0 ? Math.max(0, Math.min(100, ((durationMs - remainingMs) / durationMs) * 100)) : 0;
+    const normRows = (rows||[]).map(r => {
+      const totalMs = parseMaybeMs(r.totalMs != null ? r.totalMs : r.time);
+      const bestLapMs = Number(r.bestLapMs || r.bestMs || 0) || 0;
+      const meanMs = avgMsOf(r);
+      const paceMs = Number(r.paceMs || 0) || 0;
+      const estLapsVal = estLapsOf(r);
+      return Object.assign({}, r, {
+        key: rowKey(r),
+        lapsNum:Number(r.laps||0)||0,
+        posNum:Number(r.pos||0)||0,
+        totalMs,
+        bestLapMs,
+        meanMs,
+        paceMs,
+        avgMs: meanMs || paceMs || 0,
+        estLapsVal
+      });
+    });
+    const leader = normRows[0] || null;
+    return {
+      raceKey,
+      sessionType: pickSessionType(data, race),
+      practiceFlag: pickPracticeFlag(data, race),
+      durationMs,
+      elapsedMs,
+      remainingMs,
+      progressPct,
+      rows: normRows,
+      leaderKey: leader ? leader.key : '',
+      leaderName: leader ? String(leader.name||leader.driverName||'').trim() : '',
+      leaderLaps: leader ? (Number(leader.lapsNum||0)||0) : 0,
+      leaderBestMs: leader ? (Number(leader.bestLapMs||leader.bestMs||0)||0) : 0,
+      leaderTotalMs: leader ? (Number(leader.totalMs||0)||0) : 0,
+      globalBestMs: bestMsOfRows(normRows),
+      now: Date.now()
+    };
+  }
+  function describeSession(ctx){
+    if(ctx.sessionType === 'practice') return 'práctica';
+    if(ctx.sessionType === 'quali') return 'clasificación';
+    return 'final';
+  }
+  function leaderGapText(ctx){
+    if(!ctx || !ctx.rows || ctx.rows.length < 2) return '';
+    const p2 = ctx.rows[1];
+    return gapSpeech((p2 && (p2.gap || p2.diff)) || '');
+  }
+  function buildHeartbeatLine(ctx){
+    if(!ctx || !ctx.rows || !ctx.rows.length) return '';
+    const leader = ctx.rows[0];
+    const leaderName = leader ? String(leader.name||'').trim() : '';
+    const rem = ctx.remainingMs > 0 ? ` Restan ${speakClockMs(ctx.remainingMs)}.` : '';
+    const avgTxt = leader ? avgSpeechOf(leader) : '';
+    const estTxt = leader ? estSpeechOf(leader) : '';
+    const speedTxt = leader ? speedSpeechOf(leader) : '';
+    const progTxt = progressSpeechOf(ctx);
+    const battleTxt = battleContextText(ctx);
+    if(ctx.sessionType === 'practice'){
+      const runTxt = runSpeechOf(leader);
+      const bestTxt = ctx.globalBestMs > 0 ? ` La mejor vuelta del grupo está en ${speakLapTimeMs(ctx.globalBestMs)}.` : '';
+      const projTxt = leader ? projectedSpeechOf(leader, ctx) : '';
+      const estRunTxt = leader ? estimatedSpeechOf(leader) : '';
+      const leadTxt = leaderName ? pickPhrase('hb-practice', [
+        runTxt ? `Práctica en marcha. ${leaderName} completa ${runTxt}.` : `Práctica en marcha. ${leaderName} sigue acumulando vueltas.`,
+        runTxt ? `Sigue el trabajo en pista. ${leaderName} ya lleva ${runTxt}.` : `Sigue el trabajo en pista, con ${leaderName} al frente del registro.`,
+        runTxt ? `${leaderName} sostiene un stint sólido con ${runTxt}.` : `${leaderName} mantiene la referencia de la práctica.`,
+        runTxt ? `${leaderName} sigue construyendo la práctica con ${runTxt}.` : `${leaderName} mantiene el paso de la práctica.`
+      ]) : 'Práctica en marcha.';
+      return normalizeText(`${leadTxt} ${bestTxt} ${avgTxt} ${estRunTxt} ${projTxt} ${speedTxt} ${battleTxt} ${progTxt} ${rem}`);
+    }
+    if(ctx.sessionType === 'quali'){
+      if(leaderName){
+        const runTxt = runSpeechOf(leader);
+        const bestTxt = bestSpeechOf(leader);
+        const projTxt = leader ? projectedSpeechOf(leader, ctx) : '';
+        const estRunTxt = leader ? estimatedSpeechOf(leader) : '';
+        const tableTxt = topRowsSpeech(ctx);
+        const intro = pickPhrase('hb-quali', [
+          runTxt ? `Sigue la clasificación. ${leaderName} sostiene la pole provisional con ${runTxt}.` : `Sigue la clasificación. ${leaderName} conserva la pole provisional.`,
+          runTxt ? `Clasificación en plena marcha. ${leaderName} manda con ${runTxt}.` : `Clasificación en plena marcha. ${leaderName} sigue en la punta.`,
+          runTxt ? `${leaderName} marca el paso de la clasificación con ${runTxt}.` : `${leaderName} mantiene el mejor registro de la clasificación.`,
+          runTxt ? `La sesión de clasificación sigue viva. ${leaderName} encabeza la tabla con ${runTxt}.` : `La clasificación sigue viva y ${leaderName} encabeza la tabla.`
+        ]);
+        const bestPart = bestTxt ? ` Su mejor vuelta es de ${bestTxt}.` : '';
+        return normalizeText(`${intro}${bestPart} ${projTxt} ${estRunTxt} ${avgTxt} ${tableTxt} ${battleTxt} ${progTxt} ${rem}`);
+      }
+      return normalizeText(`Clasificación en curso. ${topRowsSpeech(ctx)} ${progTxt} ${rem}`);
+    }
+    if(leaderName){
+      const leadTxt = runSpeechOf(leader) ? pickPhrase('hb-final', [
+        `${leaderName} manda con ${runSpeechOf(leader)}.`,
+        `${leaderName} sigue al frente con ${runSpeechOf(leader)}.`,
+        `${leaderName} controla la final con ${runSpeechOf(leader)}.`
+      ]) : `${leaderName} sigue al frente.`;
+      const gapTxt = leaderGapText(ctx);
+      const gapPart = gapTxt ? ` La diferencia con el segundo es de ${gapTxt}.` : '';
+      return normalizeText(`Sigue la final. ${leadTxt} ${gapPart} ${avgTxt} ${estTxt} ${speedTxt} ${battleTxt} ${progTxt} ${rem}`);
+    }
+    return normalizeText(`Final en curso. ${progTxt} ${rem}`);
+  }
+  function maybeQueueHeartbeat(ctx){
+    if(!state.enabled || !ctx || !ctx.rows || !ctx.rows.length) return false;
+    const now = Date.now();
+    const idleMs = now - Number(state.lastSpokenAt||0);
+    const sinceHeartbeat = now - Number(state.lastHeartbeatAt||0);
+    const minIdle = (ctx.sessionType === 'final') ? 8500 : (ctx.sessionType === 'quali' ? 10000 : 12000);
+    const minGap = (ctx.sessionType === 'final') ? 10500 : (ctx.sessionType === 'quali' ? 13000 : 16000);
+    if(state.speaking || state.queue.length) return false;
+    if(idleMs < minIdle || sinceHeartbeat < minGap) return false;
+    const line = buildHeartbeatLine(ctx);
+    if(!line) return false;
+    const ok = queueLine(line, {priority:1, role:'base', ttlMs:12000, dedupeMs:6500, cat:'heartbeat', sig:`heartbeat|${ctx.raceKey}|${ctx.sessionType}|${ctx.leaderKey}|${topRowsSig(ctx)}|${ctx.globalBestMs}|${Math.floor(now/minGap)}`});
+    if(ok) state.lastHeartbeatAt = now;
+    return ok;
+  }
+  function maybeQueueSessionClock(ctx, prev){
+    if(!ctx || !ctx.durationMs || ctx.durationMs <= 0 || !state.enabled) return false;
+    const sessionName = describeSession(ctx);
+    const marks = [];
+    const pct = Number(ctx.progressPct||0) || 0;
+    const prevPct = Number(prev && prev.progressPct || 0) || 0;
+    const steps = [
+      {key:'25', at:25, text:`Se cumple el primer cuarto de ${sessionName}. Quedan ${speakClockMs(ctx.remainingMs)}.`},
+      {key:'50', at:50, text:`Mitad de ${sessionName}. Restan ${speakClockMs(ctx.remainingMs)}.`},
+      {key:'75', at:75, text:`Entramos al último cuarto de ${sessionName}. Quedan ${speakClockMs(ctx.remainingMs)}.`},
+      {key:'90', at:90, text:`Tramo final de ${sessionName}. Restan ${speakClockMs(ctx.remainingMs)}.`}
+    ];
+    for(const step of steps){
+      const sig = `prog|${ctx.raceKey}|${step.key}`;
+      if(prevPct < step.at && pct >= step.at && !state.sessionMarks.has(sig)){
+        state.sessionMarks.add(sig);
+        marks.push({text:step.text, sig, priority: step.at >= 90 ? 4 : 3});
+      }
+    }
+    const prevRem = Number(prev && prev.remainingMs || 0) || 0;
+    const thresholds = [120000, 60000, 30000, 10000];
+    thresholds.forEach(th => {
+      const sig = `clock|${ctx.raceKey}|${th}`;
+      if(prevRem > th && ctx.remainingMs <= th && ctx.remainingMs > 0 && !state.sessionMarks.has(sig)){
+        state.sessionMarks.add(sig);
+        let text = '';
+        if(th === 120000) text = `Quedan 2 minutos de ${sessionName}.`;
+        else if(th === 60000) text = `Último minuto de ${sessionName}.`;
+        else if(th === 30000) text = `Quedan 30 segundos de ${sessionName}.`;
+        else if(th === 10000) text = `Últimos 10 segundos de ${sessionName}.`;
+        if(text) marks.push({text, sig, priority: th <= 30000 ? 4 : 3});
+      }
+    });
+    if(!marks.length) return false;
+    marks.sort((a,b)=>b.priority-a.priority);
+    const picked = marks[0];
+    return queueLine(picked.text, {priority:picked.priority, role:'result', ttlMs:11000, dedupeMs:45000, cat:'session-clock', sig:picked.sig});
+  }
+  function mapRowsByKey(rows){
+    const m = new Map();
+    (rows||[]).forEach(r => m.set(r.key, r));
+    return m;
+  }
+  function ingest(data, race, rows){
+    const ctx = buildCtx(data, race, rows);
+    state.lastCtx = ctx;
+    if(!ctx.raceKey && !ctx.rows.length) return;
+    const prev = state.prev;
+    state.prev = ctx;
+    if(!state.bootstrapped){
+      state.bootstrapped = true;
+      return;
+    }
+    if(state.forceResync){
+      state.forceResync = false;
+      if(state.enabled) queueCurrentContext(ctx, 'resync');
+      maybeQueueHeartbeat(ctx);
+      return;
+    }
+    if(!state.enabled) return;
+
+    const prevRowsByKey = prev ? mapRowsByKey(prev.rows) : new Map();
+
+    if(prev && ctx.raceKey && prev.raceKey && ctx.raceKey !== prev.raceKey){
+      state.sessionMarks.clear();
+      clearQueueSoft();
+      queueLine(`Nueva ${describeSession(ctx)} en pista.`, {priority:4, role:'result', ttlMs:8000, dedupeMs:2000, cat:'session', sig:`session|${ctx.raceKey}`});
+    }
+    const prevType = prev ? prev.sessionType : '';
+    if(prev && ctx.sessionType !== prevType && ctx.raceKey === prev.raceKey){
+      queueLine(`Cambio de contexto. Ahora viene ${describeSession(ctx)}.`, {priority:3, role:'energy', ttlMs:8000, dedupeMs:4000, cat:'session-type', sig:`stype|${ctx.raceKey}|${ctx.sessionType}`});
+    }
+
+    if(ctx.sessionType === 'practice'){
+      if(prev && ctx.globalBestMs > 0 && (!prev.globalBestMs || ctx.globalBestMs < prev.globalBestMs - 20)){
+        const who = ctx.rows.find(r => (Number(r.bestLapMs||r.bestMs||0)||0) === ctx.globalBestMs);
+        if(who){
+          const runTxt = runSpeechOf(who);
+          const avgTxt = avgSpeechOf(who);
+          const estTxt = estSpeechOf(who);
+          const speedTxt = speedSpeechOf(who);
+          queueLine(normalizeText(`${who.name} deja una práctica seria. ${runTxt ? `Ya completa ${runTxt}.` : ''} La mejor vuelta del grupo queda en ${speakLapTimeMs(ctx.globalBestMs)}. ${avgTxt} ${estTxt} ${speedTxt}`), {priority:2, role:'base', ttlMs:12000, dedupeMs:4500, cat:'practice-best', sig:`pbest|${ctx.raceKey}|${who.key}|${ctx.globalBestMs}|${who.lapsNum}`});
+        }
+      }
+      for(const r of ctx.rows.slice(0, 4)){
+        const prevRow = prevRowsByKey.get(r.key);
+        const curBest = Number(r.bestLapMs||r.bestMs||0)||0;
+        const prevBest = prevRow ? (Number(prevRow.bestLapMs||prevRow.bestMs||0)||0) : 0;
+        if(curBest > 0 && prevBest > 0 && curBest < prevBest - 20){
+          const runTxt = runSpeechOf(r);
+          const estTxt = estSpeechOf(r);
+          queueLine(normalizeText(`Mejora ${r.name}. ${runTxt ? `Ya suma ${runTxt}.` : ''} Su mejor vuelta baja a ${speakLapTimeMs(curBest)}. ${estTxt}`), {priority:2, role:'base', ttlMs:11000, dedupeMs:5000, cat:'practice-improve', sig:`pimprove|${ctx.raceKey}|${r.key}|${curBest}|${r.lapsNum}`});
+          break;
+        }
+      }
+    }
+
+    if(ctx.sessionType === 'quali'){
+      if(prev && ctx.leaderKey && ctx.leaderKey !== prev.leaderKey && ctx.leaderLaps > 0){
+        const lead = ctx.rows[0];
+        const totalTxt = lead && lead.totalMs > 0 ? ` Va con ${speakLapsAndTime(lead.lapsNum, lead.totalMs)}.` : '';
+        const projTxt = lead ? ` ${projectedSpeechOf(lead, ctx)}` : '';
+        const tableTxt = ` ${topRowsSpeech(ctx)}`;
+        const poleTxt = lead && lead.bestLapMs > 0 ? ` Pole provisional para ${ctx.leaderName}, con ${speakLapTimeMs(lead.bestLapMs)}.` : ` Pole provisional para ${ctx.leaderName}.`;
+        queueLine(normalizeText(`${poleTxt}${totalTxt}${projTxt}${tableTxt}`), {priority:4, role:'energy', ttlMs:10000, dedupeMs:3000, cat:'pole', sig:`pole|${ctx.raceKey}|${ctx.leaderKey}|${ctx.leaderBestMs}`});
+      } else if(prev && ctx.leaderKey && ctx.leaderKey === prev.leaderKey && ctx.leaderBestMs > 0 && prev.leaderBestMs > 0 && ctx.leaderBestMs < prev.leaderBestMs - 20){
+        const lead = ctx.rows[0];
+        queueLine(normalizeText(`${ctx.leaderName} mejora su pole provisional con ${speakLapTimeMs(ctx.leaderBestMs)}. ${lead ? projectedSpeechOf(lead, ctx) : ''} ${topRowsSpeech(ctx)}`), {priority:3, role:'energy', ttlMs:9000, dedupeMs:3500, cat:'pole-improve', sig:`pole2|${ctx.raceKey}|${ctx.leaderKey}|${ctx.leaderBestMs}`});
+      }
+      for(const r of ctx.rows.slice(0, 6)){
+        const prevRow = prevRowsByKey.get(r.key);
+        if(!prevRow) continue;
+        if(r.posNum > 0 && prevRow.posNum > 0 && r.posNum < prevRow.posNum){
+          const jump = prevRow.posNum - r.posNum;
+          if(jump >= 2){
+            const curBest = Number(r.bestLapMs||r.bestMs||0)||0;
+            const runTxt = runSpeechOf(r);
+            const projTxt = projectedSpeechOf(r, ctx);
+            const extra = curBest > 0 ? ` Su mejor vuelta queda en ${speakLapTimeMs(curBest)}.` : '';
+            queueLine(normalizeText(`${r.name} pega un salto fuerte y gana ${jump} posiciones en la tabla. ${runTxt ? `Ya suma ${runTxt}.` : ''} ${projTxt} ${extra} ${topRowsSpeech(ctx)}`), {priority:3, role:'energy', ttlMs:10500, dedupeMs:5000, cat:'quali-jump', sig:`qjump|${ctx.raceKey}|${r.key}|${r.posNum}|${prevRow.posNum}|${r.lapsNum}`});
+            break;
+          }
+        }
+      }
+      const topSigNow = topRowsSig(ctx);
+      const topSigPrev = topRowsSig(prev);
+      if(topSigNow && topSigPrev && topSigNow !== topSigPrev){
+        queueLine(topRowsSpeech(ctx), {priority:2, role:'base', ttlMs:9000, dedupeMs:5000, cat:'quali-table', sig:`qtable|${ctx.raceKey}|${topSigNow}`});
+      }
+      const qualiBattle = findBattle(ctx);
+      if(qualiBattle){
+        const prevBehind = prevRowsByKey.get(qualiBattle.behind.key);
+        const prevBattleMs = parseGapMsSafe(prevBehind ? intervalValueOf(prevBehind) : '');
+        if(prevBattleMs > 0 && qualiBattle.ms < prevBattleMs - 180){
+          const battleTxt = battleContextText(ctx);
+          if(battleTxt){
+            queueLine(battleTxt, {priority:2, role:'base', ttlMs:9000, dedupeMs:7000, cat:'quali-battle', sig:`qbattle|${ctx.raceKey}|${qualiBattle.behind.key}|${Math.round(qualiBattle.ms/100)}`});
+          }
+        }
+      }
+    }
+
+    if(ctx.sessionType === 'final'){
+      if(prev && ctx.leaderKey && ctx.leaderKey !== prev.leaderKey && ctx.leaderLaps > 0){
+        const leader = ctx.rows[0];
+        const totalTxt = leader && leader.totalMs > 0 ? ` Ahora manda con ${speakLapsAndTime(leader.lapsNum, leader.totalMs)}.` : ` Ahora manda ${ctx.leaderName}.`;
+        queueLine(`Cambio de líder.${totalTxt}`, {priority:4, role:'energy', ttlMs:9500, dedupeMs:2500, cat:'leader', sig:`leader|${ctx.raceKey}|${ctx.leaderKey}|${ctx.leaderLaps}|${ctx.leaderTotalMs}`});
+      }
+      if(prev && ctx.rows.length > 1 && prev.rows.length > 1){
+        const p2 = ctx.rows[1];
+        const prevP2 = prev.rows.find(r => r.key === p2.key) || prev.rows[1];
+        const gapNowRaw = p2 && (p2.gap || p2.diff || '');
+        const gapPrevRaw = prevP2 && (prevP2.gap || prevP2.diff || '');
+        const gapNow = parseGapMsSafe(gapNowRaw);
+        const gapPrev = parseGapMsSafe(gapPrevRaw);
+        if(gapNow > 0 && gapPrev > 0 && gapNow < gapPrev - 250){
+          queueLine(`${p2.name} recorta terreno al frente. La diferencia ya está en ${gapSpeech(gapNowRaw)}.`, {priority:2, role:'base', ttlMs:9000, dedupeMs:6000, cat:'pressure', sig:`pressure|${ctx.raceKey}|${p2.key}|${Math.round(gapNow/100)}`});
+        }
+      }
+      if(prev && ctx.rows.length > 2 && prev.rows.length > 2){
+        const p3 = ctx.rows[2];
+        const prevP3 = prev.rows.find(r => r.key === p3.key) || prev.rows[2];
+        const gapNow3Raw = p3 && (p3.gap || p3.diff || '');
+        const gapPrev3Raw = prevP3 && (prevP3.gap || prevP3.diff || '');
+        const gapNow3 = parseGapMsSafe(gapNow3Raw);
+        const gapPrev3 = parseGapMsSafe(gapPrev3Raw);
+        if(gapNow3 > 0 && gapPrev3 > 0 && gapNow3 < gapPrev3 - 250){
+          queueLine(`Se aprieta la pelea por podio. ${p3.name} ya viene a ${gapSpeech(gapNow3Raw)}.`, {priority:2, role:'base', ttlMs:9000, dedupeMs:6500, cat:'podium-pressure', sig:`podium|${ctx.raceKey}|${p3.key}|${Math.round(gapNow3/100)}`});
+        }
+      }
+      const activeBattle = findBattle(ctx);
+      if(activeBattle){
+        const prevBehind = prevRowsByKey.get(activeBattle.behind.key);
+        const prevBattleMs = parseGapMsSafe(prevBehind ? intervalValueOf(prevBehind) : '');
+        if(prevBattleMs > 0 && activeBattle.ms < prevBattleMs - 180){
+          const battleTxt = battleContextText(ctx);
+          if(battleTxt){
+            queueLine(battleTxt, {priority:2, role:'base', ttlMs:9000, dedupeMs:7000, cat:'battle', sig:`battle|${ctx.raceKey}|${activeBattle.behind.key}|${Math.round(activeBattle.ms/100)}`});
+          }
+        }
+      }
+    }
+
+    if(prev && ctx.globalBestMs > 0 && (!prev.globalBestMs || ctx.globalBestMs < prev.globalBestMs - 20) && ctx.sessionType !== 'practice'){
+      const who = ctx.rows.find(r => (Number(r.bestLapMs||r.bestMs||0)||0) === ctx.globalBestMs);
+      if(who) queueLine(normalizeText(`Vuelta grande de ${who.name}. ${runSpeechOf(who) ? `Ya suma ${runSpeechOf(who)}.` : ''} Mejor registro de la sesión, ${speakLapTimeMs(ctx.globalBestMs)}.`), {priority:3, role:'energy', ttlMs:9500, dedupeMs:4500, cat:'best', sig:`best|${ctx.raceKey}|${who.key}|${ctx.globalBestMs}|${who.lapsNum}`});
+    }
+    maybeQueueSessionClock(ctx, prev);
+    if(prev && prev.remainingMs > 0 && ctx.durationMs > 0 && ctx.remainingMs === 0 && ctx.leaderName){
+      const leader = ctx.rows[0];
+      const leadTxt = leader ? speakLapsAndTime(leader.lapsNum, leader.totalMs) : '';
+      const body = leadTxt ? ` Victoria para ${ctx.leaderName}, con ${leadTxt}.` : ` Victoria para ${ctx.leaderName}.`;
+      queueLine(`Bandera a cuadros.${body}`, {priority:5, role:'result', ttlMs:14000, dedupeMs:12000, cat:'finish', sig:`finish|${ctx.raceKey}|${ctx.leaderKey}|${ctx.leaderLaps}`});
+    }
+
+    maybeQueueHeartbeat(ctx);
+  }
+  function parseGapMsSafe(v){
+    if(v == null) return 0;
+    const s = String(v).trim();
+    if(!s || /^[-–—]+$/.test(s)) return 0;
+    if(/^\+?\s*\d+\s*(?:V|L|VTA|VUELTA|VUELTAS)\b/i.test(s)) return 0;
+    const m = s.match(/([0-9]+)(?:\.([0-9]{1,3}))?/);
+    if(!m) return 0;
+    const sec = Number(m[1]||0);
+    const frac = Number(String(m[2]||'').padEnd(3,'0'));
+    return sec*1000 + frac;
+  }
+  narrator.init = function(){
+    try{ state.enabled = (localStorage.getItem(LS_KEY_ENABLED) || '0') === '1'; }catch(e){ state.enabled = false; }
+    refreshVoicesBurst();
+    startWatchdog();
+    const btn = elBtn();
+    if(btn && !btn.__ttsBound){
+      btn.__ttsBound = true;
+      btn.addEventListener('click', function(){
+        refreshVoicesBurst();
+        const hasVoice = !!state.roles.primary;
+        if(!hasVoice){ updateButton(); return; }
+        state.enabled = !state.enabled;
+        try{ localStorage.setItem(LS_KEY_ENABLED, state.enabled ? '1' : '0'); }catch(e){}
+        if(!state.enabled){
+          cancelSpeech();
+        }else{
+          state.forceResync = true;
+          if(!unlockAndConfirm()){
+            queueCurrentContext(state.lastCtx, 'enable');
+            speakNext();
+          }
+        }
+        updateButton();
+      });
+      btn.addEventListener('contextmenu', function(ev){
+        ev.preventDefault();
+        refreshVoicesBurst();
+        queueLine('Prueba de narrador.', {priority:5, role:'result', ttlMs:6000, dedupeMs:1000, cat:'probe', sig:`probe|${Date.now()}`});
+        speakNext();
+        updateButton();
+      });
+    }
+    if(window.speechSynthesis && !window.__trNarratorVoicesBound){
+      window.__trNarratorVoicesBound = true;
+      try{ window.speechSynthesis.addEventListener('voiceschanged', function(){ refreshVoicesBurst(); }); }catch(e){}
+    }
+    updateButton();
+  };
+  narrator.ingest = ingest;
+  narrator.reset = function(reason){
+    state.prev = null;
+    state.lastCtx = null;
+    state.bootstrapped = false;
+    state.forceResync = true;
+    state.lastSpokenAt = 0;
+    state.lastHeartbeatAt = 0;
+    state.sessionMarks.clear();
+    cancelSpeech();
+    updateButton();
+  };
+})();
+
+
 // Boot
 window.addEventListener('load', () => {
   try{
@@ -3698,6 +4850,7 @@ window.addEventListener('load', () => {
     if(vEl) vEl.textContent = RACEBOARD_VERSION;
     document.title = RACEBOARD_VERSION;
   }catch(e){}
+  try{ window.TRNarrator && window.TRNarrator.init && window.TRNarrator.init(); }catch(e){}
   if(initFirebase()){
     startListener();
   }
